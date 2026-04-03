@@ -34,4 +34,4 @@ server = "data_wrangler_env.server.app:main"
 [tool.setuptools]
 include-package-data = true
 packages = ["data_wrangler_env", "data_wrangler_env.server"]
-package-dir = { "data_wrangler_env" = ".", "data_wrangler_env.server" = "server" }
+package-dir = { "data_wrangler_env" = "data_wrangler_env", "data_wrangler_env.server" = "data_wrangler_env/server" }

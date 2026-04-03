@@ -13,15 +13,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy all project files
-COPY data_wrangler_env/ /app/data_wrangler_env/
-COPY inference.py /app/inference.py
+COPY . /app/
 
-# Install using pyproject.toml from the package dir
-WORKDIR /app/data_wrangler_env
-RUN pip install --no-cache-dir -e .
-
-# Work from /app so that `data_wrangler_env` is a proper package on the path
+# Install using pyproject.toml from the root
 WORKDIR /app
+RUN pip install --no-cache-dir -e .
 
 # PYTHONPATH: /app is already on path since we're the WORKDIR
 ENV PYTHONPATH="/app"
