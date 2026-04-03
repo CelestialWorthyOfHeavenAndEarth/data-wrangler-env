@@ -165,6 +165,9 @@ class DataWranglerEnvironment(Environment):
                 done=True,
             )
 
+        if self._dirty_df is None:
+            self.reset()
+
         # Check max steps
         if step_num > self._max_steps:
             self._done = True
