@@ -2,6 +2,5 @@ spec_version: 1
 name: data_wrangler_env
 type: space
 runtime: fastapi
-app: server.app:app
+app: data_wrangler_env.server.app:app
 port: 8000
-
