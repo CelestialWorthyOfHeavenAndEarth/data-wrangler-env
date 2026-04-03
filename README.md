@@ -12,7 +12,7 @@ tags:
   - reinforcement-learning
 ---
 
-# 🧹 DataWranglerEnv — Data Quality & Cleaning Environment
+# DataWranglerEnv — Data Quality & Cleaning Environment
 
 
 An [OpenEnv](https://github.com/meta-pytorch/OpenEnv)-compliant environment where AI agents act as data analysts fixing messy real-world datasets.
@@ -21,7 +21,37 @@ Data cleaning consumes **60-80% of data scientists' time** in practice. This env
 
 ---
 
-## 🎯 Environment Description
+
+## Architecture Workflow
+
+```mermaid
+sequenceDiagram
+    participant Agent as LLM Agent
+    participant API as OpenEnv Server
+    participant Engine as Cleaning Engine
+    participant Dataset as In-Memory Dataset
+    participant Grader as Evaluator/Grader
+
+    Agent->>API: HTTP POST /reset
+    API->>Dataset: Generate Corrupted Data
+    API-->>Agent: Initial Observation
+
+    loop Until Done
+        Agent->>API: HTTP POST /step {"message": "fill_missing age mean"}
+        API->>Engine: Parse Command
+        Engine->>Dataset: Apply Data Transformations
+        Engine->>Grader: Request Quality Check
+        Grader-->>API: Calculate Fractional Reward (0.0 to 1.0)
+        API-->>Agent: Observation + Reward
+    end
+    
+    Agent->>API: HTTP POST /step {"message": "submit"}
+    API->>Grader: Final E2E Accuracy Check
+    Grader-->>API: Final Ground-Truth Score
+    API-->>Agent: End Episode
+```
+
+## Environment Description
 
 The agent receives a messy dataset and must clean it using text commands. Each episode:
 
@@ -41,7 +71,7 @@ The agent receives a messy dataset and must clean it using text commands. Each e
 
 ---
 
-## 📊 Tasks
+## Tasks
 
 | Task | Dataset | Rows | Cols | Issues | Max Steps |
 |------|---------|------|------|--------|-----------|
@@ -59,7 +89,7 @@ The agent receives a messy dataset and must clean it using text commands. Each e
 
 ---
 
-## 🕹️ Action Space
+## ️ Action Space
 
 **`DataWranglerAction(message: str)`** — A single text command string.
 
@@ -86,7 +116,7 @@ The agent receives a messy dataset and must clean it using text commands. Each e
 
 ---
 
-## 👁️ Observation Space
+## ️ Observation Space
 
 **`DataWranglerObservation`** — Structured response with metadata.
 
@@ -104,7 +134,7 @@ The agent receives a messy dataset and must clean it using text commands. Each e
 
 ---
 
-## 🏆 Reward Function
+## Reward Function
 
 **Multi-dimensional, trajectory-level signal** (not sparse binary):
 
@@ -127,7 +157,7 @@ The agent receives a messy dataset and must clean it using text commands. Each e
 
 ---
 
-## 🚀 Setup & Usage
+## Setup & Usage
 
 ### Prerequisites
 - Python >= 3.10
@@ -188,7 +218,7 @@ with DataWranglerEnv(base_url="http://localhost:8000").sync() as client:
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 data_wrangler_env/
@@ -210,7 +240,7 @@ inference.py                          # Baseline inference script (project root)
 
 ---
 
-## 🔬 Design Decisions
+## Design Decisions
 
 1. **Text command interface**: Agent sends simple text strings — more natural for LLMs than structured JSON actions
 2. **Seeded generation**: `random.Random(seed)` ensures identical datasets across runs
@@ -220,6 +250,6 @@ inference.py                          # Baseline inference script (project root)
 
 ---
 
-## 📄 License
+## License
 
 BSD-3-Clause — see [LICENSE](LICENSE)
