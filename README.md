@@ -1,3 +1,12 @@
+---
+title: data-wrangler-env
+emoji: 🧹
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # DataWranglerEnv 🧹
 
 > A rich, multi-dimensional data quality & cleaning environment for training and evaluating AI agents.
