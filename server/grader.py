@@ -157,7 +157,9 @@ def compute_score(
     }
 
     composite = sum(scores[dim] * weights[dim] for dim in weights)
-    composite = min(1.0, max(0.0, composite))
+    # Clamp to open interval (0, 1) — the OpenEnv validator rejects
+    # scores of exactly 0.0 or 1.0.
+    composite = max(0.001, min(0.999, composite))
 
     return composite, scores
 

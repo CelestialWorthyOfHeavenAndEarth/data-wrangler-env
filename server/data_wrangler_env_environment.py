@@ -239,6 +239,10 @@ class DataWranglerEnvironment(Environment):
 
     # ── Private helpers ──────────────────────────────────────────────────
 
+    def _clamp_score(self, score: float) -> float:
+        """Clamp score to open interval (0, 1) per validator requirement."""
+        return max(0.001, min(0.999, score))
+
     def _make_observation(self, response: str, reward: float, done: bool) -> DataWranglerObservation:
         """Create a DataWranglerObservation with current state info."""
         shape = ""
@@ -248,13 +252,13 @@ class DataWranglerEnvironment(Environment):
         return DataWranglerObservation(
             response=response,
             dataset_shape=shape,
-            current_score=self._last_score,
+            current_score=self._clamp_score(self._last_score),
             step_number=self._state.step_count,
             max_steps=self._max_steps,
             task_name=self._task_name,
             available_commands=COMMANDS_HELP,
             done=done,
-            reward=reward,
+            reward=self._clamp_score(reward) if done else reward,
             metadata={
                 "cumulative_reward": round(self._cumulative_reward, 4),
                 "task": self._task_name,
