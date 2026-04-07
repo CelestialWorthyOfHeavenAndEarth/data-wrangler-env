@@ -93,13 +93,20 @@ COMMANDS_HELP = """Available commands:
   find_missing                  - Show missing value counts per column
   find_duplicates [COL1,COL2]   - Find duplicate rows (optional subset of columns)
   find_outliers COL             - Statistical outlier detection for a numeric column
+  check_rules                   - Check business rule violations
+  history                       - Show operation history (data lineage)
   fill_missing COL STRATEGY [VALUE] - Fill nulls (mean/median/mode/constant VALUE)
   remove_duplicates [COL1,COL2] [KEEP] - Drop duplicates (keep: first/last/none)
   fix_dtype COL TYPE            - Cast column to type (int/float/str/datetime)
   replace COL OLD NEW           - Replace specific values in a column
+  regex_replace COL PATTERN REPLACEMENT - Regex-based replacement
   standardize COL METHOD        - Normalize formatting (lowercase/uppercase/titlecase/strip)
   remove_rows COL CONDITION VALUE - Remove rows (CONDITION: equals/not_equals/less_than/greater_than/contains)
   clip COL LOWER UPPER          - Clip numeric values to [LOWER, UPPER]
+  rename_column OLD_NAME NEW_NAME - Rename a column
+  drop_column COL               - Remove a column
+  sort COL [asc|desc]           - Sort data by column
+  undo                          - Undo the last data-modifying operation
   validate                      - Check current quality score without submitting
   submit                        - Finalize and grade the cleaned dataset (ends episode)
 """
@@ -128,6 +135,15 @@ def generate_task_1_easy(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFrame
             "city": city, "signup_date": signup_date,
         })
 
+    # ── Red herring rows: valid-but-suspicious data ──
+    # These SHOULD NOT be cleaned — tests agents don't over-clean
+    rows.append({"name": "Null Fisher", "email": "null.fisher42@example.com",
+                 "age": 45, "city": "New York", "signup_date": "2023-06-15"})
+    rows.append({"name": "None Yamada", "email": "none.yamada7@example.com",
+                 "age": 28, "city": "Los Angeles", "signup_date": "2022-12-01"})
+    rows.append({"name": "Na Lee", "email": "na.lee99@example.com",
+                 "age": 0, "city": "Chicago", "signup_date": "2024-01-01"})  # Baby
+
     clean_df = pd.DataFrame(rows)
 
     # Create dirty copy
@@ -149,7 +165,6 @@ def generate_task_1_easy(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFrame
     issues["duplicates"] = [{"source_row": idx} for idx in dupe_indices]
 
     # Inject city name typos (3 random rows)
-    available_cities = [c for c in CITIES if c in CITY_TYPOS]
     typo_indices = rng.sample(range(n_rows), min(3, n_rows))
     for idx in typo_indices:
         original_city = dirty_df.at[idx, "city"]
@@ -160,6 +175,20 @@ def generate_task_1_easy(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFrame
 
     # Convert age to float (because of NaN)
     dirty_df["age"] = pd.to_numeric(dirty_df["age"], errors="coerce")
+
+    # ── Golden rows: select rows that must not be damaged (anti-exploit) ──
+    golden_indices = rng.sample(range(len(clean_df)), min(5, len(clean_df)))
+    issues["golden_indices"] = golden_indices
+
+    # ── Business rules ──
+    issues["business_rules"] = [
+        {"type": "range", "column": "age", "min": 0, "max": 120,
+         "description": "Age must be between 0 and 120"},
+        {"type": "not_null", "column": "email",
+         "description": "Email address is required"},
+        {"type": "pattern", "column": "email", "pattern": r".*@.*\..*",
+         "description": "Email must contain @ and domain"},
+    ]
 
     return dirty_df, clean_df, issues
 
@@ -189,6 +218,14 @@ def generate_task_2_medium(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFra
             "price": price, "quantity": quantity, "date": date_str,
             "customer_id": customer_id, "region": region,
         })
+
+    # ── Red herring rows: legitimate edge cases that should NOT be cleaned ──
+    rows.append({"transaction_id": "TXN-FREE01", "product": "Promotional Sticker",
+                 "category": "Accessories", "price": 0.00, "quantity": 1,
+                 "date": "2023-07-04", "customer_id": "CUST-1500", "region": "North"})
+    rows.append({"transaction_id": "TXN-BULK01", "product": "Ethernet Cable",
+                 "category": "Networking", "price": 2.99, "quantity": 500,
+                 "date": "2023-11-24", "customer_id": "CUST-1001", "region": "Central"})
 
     clean_df = pd.DataFrame(rows)
     dirty_df = clean_df.copy()
@@ -244,6 +281,23 @@ def generate_task_2_medium(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFra
         if pd.notna(dirty_df.at[idx, "price"]) and not isinstance(dirty_df.at[idx, "price"], str):
             dirty_df.at[idx, "price"] = round(rng.uniform(50000, 99999), 2)
             issues["outliers"].append({"row": idx, "column": "price"})
+
+    # ── Golden rows ──
+    golden_indices = rng.sample(range(len(clean_df)), min(8, len(clean_df)))
+    issues["golden_indices"] = golden_indices
+
+    # ── Business rules ──
+    issues["business_rules"] = [
+        {"type": "range", "column": "price", "min": 0, "max": 10000,
+         "description": "Price must be between $0 and $10,000"},
+        {"type": "range", "column": "quantity", "min": 1, "max": 1000,
+         "description": "Quantity must be between 1 and 1000"},
+        {"type": "not_null", "column": "transaction_id",
+         "description": "Transaction ID is required"},
+        {"type": "categorical", "column": "region",
+         "allowed_values": ["North", "South", "East", "West", "Central"],
+         "description": "Region must be a valid US region"},
+    ]
 
     return dirty_df, clean_df, issues
 
@@ -413,6 +467,29 @@ def generate_task_3_hard(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFrame
                 issues["format_inconsistencies"].append({"row": idx, "column": "dob"})
             except (ValueError, TypeError):
                 pass
+
+    # ── Golden rows: important rows for anti-exploit ──
+    golden_indices = rng.sample(range(len(clean_df)), min(15, len(clean_df)))
+    issues["golden_indices"] = golden_indices
+
+    # ── Business rules (healthcare domain constraints) ──
+    issues["business_rules"] = [
+        {"type": "range", "column": "height_cm", "min": 30, "max": 250,
+         "description": "Height must be between 30cm and 250cm"},
+        {"type": "range", "column": "weight_kg", "min": 1, "max": 300,
+         "description": "Weight must be between 1kg and 300kg"},
+        {"type": "cross_column", "column_a": "bp_systolic", "column_b": "bp_diastolic",
+         "relation": "greater_than",
+         "description": "Systolic BP must be greater than Diastolic BP"},
+        {"type": "categorical", "column": "gender",
+         "allowed_values": ["Male", "Female"],
+         "description": "Gender must be 'Male' or 'Female'"},
+        {"type": "categorical", "column": "blood_type",
+         "allowed_values": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+         "description": "Blood type must be a valid ABO+Rh type"},
+        {"type": "not_null", "column": "patient_id",
+         "description": "Patient ID is required"},
+    ]
 
     return dirty_df, clean_df, issues
 

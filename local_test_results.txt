@@ -4,7 +4,7 @@
   PASS: Reset returns observation
   PASS: step_number=0
   PASS: done=False
-  PASS: Shape has 55
+  PASS: Shape has 58
 
 [2] Step increments
   PASS: step_number=1

@@ -1,255 +1,232 @@
----
-title: Data Wrangler Env
-emoji: 🧹
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
-pinned: false
-tags:
-  - openenv
-  - data-cleaning
-  - reinforcement-learning
----
+# DataWranglerEnv 🧹
 
-# DataWranglerEnv — Data Quality & Cleaning Environment
-
-
-An [OpenEnv](https://github.com/meta-pytorch/OpenEnv)-compliant environment where AI agents act as data analysts fixing messy real-world datasets.
-
-Data cleaning consumes **60-80% of data scientists' time** in practice. This environment simulates the exact workflow: profile data → diagnose issues → apply targeted fixes → validate results. Agents are scored on a multi-dimensional quality metric against known ground truth.
+> A rich, multi-dimensional data quality & cleaning environment for training and evaluating AI agents.
+> Built for the **Meta PyTorch Hackathon × Scaler School of Technology**.
 
 ---
 
+## 🎯 What is DataWranglerEnv?
 
-## Architecture Workflow
+Data wrangling consumes **80% of every data scientist's time**, yet no benchmark exists for training AI agents to automate it. DataWranglerEnv fills this gap.
 
-```mermaid
-sequenceDiagram
-    participant Agent as LLM Agent
-    participant API as OpenEnv Server
-    participant Engine as Cleaning Engine
-    participant Dataset as In-Memory Dataset
-    participant Grader as Evaluator/Grader
+Agents receive a messy real-world dataset and must **diagnose**, **clean**, and **validate** it using natural language commands. The environment provides rich feedback through an **8-dimensional grading system**, supports **undo/redo** for experimentation, enforces **business rules**, and includes **anti-exploit mechanisms** to prevent gaming.
 
-    Agent->>API: HTTP POST /reset
-    API->>Dataset: Generate Corrupted Data
-    API-->>Agent: Initial Observation
+### Why This Matters
 
-    loop Until Done
-        Agent->>API: HTTP POST /step {"message": "fill_missing age mean"}
-        API->>Engine: Parse Command
-        Engine->>Dataset: Apply Data Transformations
-        Engine->>Grader: Request Quality Check
-        Grader-->>API: Calculate Fractional Reward (0.0 to 1.0)
-        API-->>Agent: Observation + Reward
-    end
-    
-    Agent->>API: HTTP POST /step {"message": "submit"}
-    API->>Grader: Final E2E Accuracy Check
-    Grader-->>API: Final Ground-Truth Score
-    API-->>Agent: End Episode
+- **Real-world utility**: Every data team needs automated data cleaning
+- **Progressive complexity**: Easy → Medium → Hard tasks with genuine difficulty scaling
+- **Rich feedback**: 8 grading dimensions, data lineage tracking, and cleaning provenance reports
+- **Exploit-resistant**: Golden row integrity checks, red herring data, and constraint validation
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│                inference.py                  │
+│         (3-Phase LLM Agent Strategy)         │
+│    DIAGNOSE → CLEAN → VERIFY → SUBMIT       │
+└──────────────────┬──────────────────────────┘
+                   │ HTTP (reset/step/state)
+┌──────────────────▼──────────────────────────┐
+│           OpenEnv HTTP Server                │
+│              (FastAPI)                       │
+├──────────────────────────────────────────────┤
+│         DataWranglerEnvironment              │
+│  ┌───────────┐  ┌──────────┐  ┌───────────┐ │
+│  │ Cleaning   │  │ Dataset  │  │  Grader   │ │
+│  │ Engine     │  │Generator │  │ (8-dim)   │ │
+│  │ 20+ cmds   │  │ 3 tasks  │  │ composite │ │
+│  └───────────┘  └──────────┘  └───────────┘ │
+│  ┌───────────┐  ┌──────────┐  ┌───────────┐ │
+│  │   Undo    │  │  Data    │  │  Golden   │ │
+│  │   Stack   │  │ Lineage  │  │   Rows    │ │
+│  └───────────┘  └──────────┘  └───────────┘ │
+└──────────────────────────────────────────────┘
 ```
 
-## Environment Description
+---
 
-The agent receives a messy dataset and must clean it using text commands. Each episode:
+## 📊 Tasks
 
-1. **Reset** — A fresh dirty dataset is generated (seeded for reproducibility)
-2. **Explore** — Agent profiles the data to understand its issues
-3. **Diagnose** — Agent finds missing values, duplicates, outliers, type errors
-4. **Clean** — Agent applies targeted fixes (fill missing, remove dupes, fix types, etc.)
-5. **Submit** — Agent finalizes, gets a quality score against ground truth
+| Task | Domain | Size | Issues | Difficulty |
+|------|--------|------|--------|------------|
+| `task_1_easy` | Customer Records | 53 rows × 5 cols | Missing values, duplicates, typos | ⭐ |
+| `task_2_medium` | Sales Transactions | 202 rows × 8 cols | Types, dates, negatives, outliers | ⭐⭐ |
+| `task_3_hard` | Healthcare Records | 1000+ rows × 12 cols | Fuzzy dupes, logic errors, impossible values, format inconsistencies | ⭐⭐⭐ |
 
-### Why Data Cleaning?
+### Data Quality Issues Covered
 
-- ✅ **Real-world task** that data scientists do every day
-- ✅ **Multi-step reasoning** — must diagnose before fixing
-- ✅ **Partial progress** — each fix incrementally improves the score
-- ✅ **Anti-exploit design** — destructive "shortcuts" are penalized
-- ✅ **Novel domain** — no existing OpenEnv covers data wrangling
+- **Missing values** — NaN/None across columns
+- **Exact duplicates** — Identical rows
+- **Fuzzy duplicates** — Same entity, different spelling ("A. Smith" vs "Alice Smith")
+- **Type errors** — Strings in numeric columns ("$42.99" instead of 42.99)
+- **Date inconsistencies** — Mixed formats (YYYY-MM-DD vs DD/MM/YYYY)
+- **Negative values** — Negative quantities/prices where invalid
+- **Outliers** — Extreme statistical outliers
+- **Category inconsistencies** — "Male" vs "M" vs "male" vs "MALE"
+- **Impossible values** — Negative height, weight > 500kg
+- **Cross-column logic errors** — Diastolic BP > Systolic BP
+- **Red herring data** — Valid data that looks suspicious (person named "Null", $0 promo items)
 
 ---
 
-## Tasks
+## 🎖️ 8-Dimension Grading System
 
-| Task | Dataset | Rows | Cols | Issues | Max Steps |
-|------|---------|------|------|--------|-----------|
-| `task_1_easy` | Customer Records | 50 | 5 | Missing values, duplicates, city typos | 30 |
-| `task_2_medium` | Sales Transactions | 200 | 8 | + Type errors, date inconsistencies, outliers, negative values | 50 |
-| `task_3_hard` | Healthcare Records | 1000 | 12 | + Fuzzy duplicates, cross-column logic errors, impossible values, category inconsistencies | 80 |
-
-### Expected Baseline Scores
-
-| Task | Score Range |
-|------|------------|
-| `task_1_easy` | 0.75 – 0.90 |
-| `task_2_medium` | 0.55 – 0.75 |
-| `task_3_hard` | 0.30 – 0.55 |
+| Dimension | Weight | What it measures |
+|-----------|--------|------------------|
+| Missing Values Fixed | 20% | How many missing values were properly filled |
+| Duplicates Removed | 15% | Exact duplicate row elimination |
+| Type Correctness | 15% | Column data types match expected types |
+| Value Accuracy | 20% | Cell-level accuracy vs ground truth |
+| Data Preservation | 10% | Didn't delete legitimate data |
+| Constraint Compliance | 10% | Business rule satisfaction (domain-specific) |
+| Step Efficiency | 5% | Fewer steps = higher score (rewards planning) |
+| Golden Row Integrity | 5% | Anti-exploit: selected "golden" rows must survive cleaning |
 
 ---
 
-## ️ Action Space
+## 🛡️ Anti-Exploit Features
 
-**`DataWranglerAction(message: str)`** — A single text command string.
+### Golden Rows
+A random subset of clean rows is marked as "golden." If an agent damages these rows (e.g., by deleting everything and re-inserting), the golden_row_integrity score drops. This prevents:
+- Agents that delete all rows and submit empty datasets
+- Agents that fill all missing values with a single constant
+- Agents that game the grader by targeting specific metrics
 
-### Available Commands
+### Red Herring Data
+The dataset includes valid-but-suspicious data:
+- A customer named **"Null Fisher"** — a real person, not missing data
+- A product priced at **$0.00** — a legitimate free promotional item
+- A customer aged **0** — a valid baby record
 
-| Command | Usage | Description |
-|---------|-------|-------------|
-| `help` | `help` | List all commands |
-| `view` | `view [N]` | Show first N rows (default 10) |
-| `profile` | `profile` | Dataset summary: shape, dtypes, missing %, duplicates |
-| `profile_column` | `profile_column age` | Detailed stats for one column |
-| `find_missing` | `find_missing` | Missing value counts per column |
-| `find_duplicates` | `find_duplicates [col1,col2]` | Find duplicate rows |
-| `find_outliers` | `find_outliers price` | IQR-based outlier detection |
-| `fill_missing` | `fill_missing col strategy [value]` | Fill nulls (`mean`/`median`/`mode`/`constant`/`forward_fill`) |
-| `remove_duplicates` | `remove_duplicates [cols] [keep]` | Drop duplicates (`first`/`last`/`none`) |
-| `fix_dtype` | `fix_dtype col type` | Cast column (`int`/`float`/`str`/`datetime`) |
-| `replace` | `replace col "old" "new"` | Find and replace values |
-| `standardize` | `standardize col method` | Normalize (`lowercase`/`uppercase`/`titlecase`/`strip`) |
-| `remove_rows` | `remove_rows col condition value` | Filter rows (`equals`/`less_than`/`greater_than`/`contains`) |
-| `clip` | `clip col lower upper` | Clip numeric values to bounds |
-| `validate` | `validate` | Check current quality score |
-| `submit` | `submit` | Finalize and grade (ends episode) |
+These test whether agents over-clean by removing data that looks dirty but is actually correct.
+
+### Business Rule Validation
+Domain-specific constraints that agents must satisfy:
+- `age ∈ [0, 120]` (customer records)
+- `price ∈ [$0, $10,000]` (sales)
+- `systolic_bp > diastolic_bp` (healthcare)
+- Valid categories only (gender must be "Male" or "Female")
 
 ---
 
-## ️ Observation Space
+## 🔧 20+ Commands
 
-**`DataWranglerObservation`** — Structured response with metadata.
+### Diagnostic (Read-Only)
+```
+profile                    → Dataset overview
+profile_column COL         → Column statistics
+find_missing               → Missing value report
+find_duplicates [COLS]     → Duplicate detection
+find_outliers COL          → Outlier detection (IQR)
+check_rules                → Business rule violations
+history                    → Operation history / data lineage
+view [N]                   → Preview rows
+```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `response` | `str` | Text result of the command |
-| `dataset_shape` | `str` | e.g. `"50 rows × 5 columns"` |
-| `current_score` | `float` | Current quality score (0.0–1.0) |
-| `step_number` | `int` | Current step in the episode |
-| `max_steps` | `int` | Maximum allowed steps |
-| `task_name` | `str` | Active task identifier |
-| `available_commands` | `str` | Help text |
-| `done` | `bool` | Whether episode is over |
-| `reward` | `float` | Step reward |
+### Cleaning (Modifies Data)
+```
+fill_missing COL STRATEGY  → Fill nulls (mean/median/mode/constant/forward_fill)
+remove_duplicates [COLS]   → Drop duplicates
+fix_dtype COL TYPE         → Cast types (int/float/str/datetime)
+replace COL OLD NEW        → Replace values
+regex_replace COL PAT NEW  → Regex-based replacement
+standardize COL METHOD     → Format normalization
+remove_rows COL COND VAL   → Conditional row removal
+clip COL LOW HIGH          → Clip numeric values
+rename_column OLD NEW      → Rename columns
+drop_column COL            → Remove columns
+sort COL [asc|desc]        → Sort data
+undo                       → Undo last modification
+```
 
----
-
-## Reward Function
-
-**Multi-dimensional, trajectory-level signal** (not sparse binary):
-
-### Per-Step Rewards
-- **Diagnostic commands** (`profile`, `find_missing`, etc.): +0.02
-- **Successful cleaning operations**: +0.03 to +0.15 (proportional to improvement)
-- **Destructive actions** (lost good data): -0.05 to -0.20
-- **No-effect commands**: -0.01
-- **`validate`**: +0.01 (first 5 times)
-- **`submit`**: Final quality score as reward
-
-### Final Score Dimensions
-| Dimension | Weight | Measurement |
-|-----------|--------|-------------|
-| Missing values fixed | 25% | Reduction in null cells |
-| Duplicates removed | 20% | Reduction in duplicate rows |
-| Type correctness | 20% | Columns matching expected dtypes |
-| Value accuracy | 25% | Cell-by-cell match with ground truth |
-| Data preservation | 10% | Penalty for losing valid rows |
+### Evaluation
+```
+validate                   → Check quality score (8 dimensions)
+submit                     → Finalize and grade
+```
 
 ---
 
-## Setup & Usage
+## 📋 Data Lineage & Provenance
+
+Every operation is tracked. On submit, the environment generates a **Cleaning Provenance Report**:
+
+```
+=== Cleaning Provenance Report ===
+Total steps: 15
+  Diagnostic (read-only): 6
+  Data-modifying: 9
+  Undo operations: 1
+
+Data Transformations Applied:
+  Step  3: fix_dtype price float (rows: 218 → 218)
+  Step  5: fill_missing price median
+  Step  7: remove_duplicates (rows: 218 → 202)
+  Step  9: clip price 0 10000
+  Step 11: standardize region titlecase
+```
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- Python >= 3.10
-- Docker (for containerized execution)
-
-### Install
 ```bash
-cd data_wrangler_env
-pip install -e .
+pip install openenv-core openai requests pandas numpy
 ```
 
-### Run Locally
+### Run the Environment
 ```bash
-# Start the server
-uv run server
-
-# Or with uvicorn directly
 uvicorn server.app:app --host 0.0.0.0 --port 8000
-```
-
-### Docker
-```bash
-# Build
-docker build -t data-wrangler-env -f server/Dockerfile .
-
-# Run
-docker run -p 8000:8000 data-wrangler-env
 ```
 
 ### Run Inference
 ```bash
-export API_BASE_URL="https://api.openai.com/v1"
-export MODEL_NAME="gpt-4o-mini"
-export HF_TOKEN="your-api-key"
+export API_BASE_URL="https://router.huggingface.co/v1"
+export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
+export HF_TOKEN="your-key"
 python inference.py
 ```
 
-### Client Usage
-```python
-from data_wrangler_env import DataWranglerEnv, DataWranglerAction
+---
 
-with DataWranglerEnv(base_url="http://localhost:8000").sync() as client:
-    result = client.reset(task="task_1_easy", seed=42)
-    print(result.observation.response)
+## 🧠 Baseline Agent Strategy
 
-    result = client.step(DataWranglerAction(message="profile"))
-    print(result.observation.response)
+The baseline inference agent uses a **3-phase architecture**:
 
-    result = client.step(DataWranglerAction(message="find_missing"))
-    print(result.observation.response)
+1. **DIAGNOSE** (first 15% of steps): `profile` → `find_missing` → `find_duplicates` → `check_rules` → `find_outliers`
+2. **CLEAN** (middle 70%): Fix types → Fill missing → Remove duplicates → Fix outliers → Standardize categories → Fix business rules
+3. **VERIFY** (last 15%): `validate` → Fix remaining issues → `submit`
 
-    result = client.step(DataWranglerAction(message="fill_missing age mean"))
-    print(result.observation.response, result.reward)
-
-    result = client.step(DataWranglerAction(message="submit"))
-    print(f"Final score: {result.observation.current_score}")
-```
+This teaches agents a real-world data cleaning workflow rather than random exploration.
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
-data_wrangler_env/
-├── __init__.py                       # Package exports
-├── models.py                         # Pydantic Action/Observation models
-├── client.py                         # EnvClient subclass
-├── openenv.yaml                      # OpenEnv manifest
-├── pyproject.toml                    # Dependencies
+data-wrangler-env/
+├── inference.py                    # Baseline LLM agent (3-phase strategy)
+├── models.py                       # Pydantic Action/Observation models
+├── openenv.yaml                    # OpenEnv specification
+├── pyproject.toml                  # Python dependencies
+├── requirements.txt                # Pip requirements
+├── Dockerfile                      # HF Spaces deployment
 ├── server/
-│   ├── app.py                        # FastAPI app
-│   ├── data_wrangler_env_environment.py  # Core environment logic
-│   ├── dataset_generator.py          # Synthetic dataset generation
-│   ├── cleaning_engine.py            # Command parser + operations
-│   ├── grader.py                     # Multi-dimensional scoring
-│   ├── Dockerfile                    # Container image
-│   └── requirements.txt             # Server dependencies
-inference.py                          # Baseline inference script (project root)
+│   ├── app.py                      # FastAPI application
+│   ├── data_wrangler_env_environment.py  # Environment core (undo, lineage, rules)
+│   ├── cleaning_engine.py          # 20+ command implementations
+│   ├── dataset_generator.py        # 3 task generators (with red herrings)
+│   ├── grader.py                   # 8-dimension scoring system
+│   └── Dockerfile                  # Server Docker build
+└── test_local.py                   # Local unit tests
 ```
 
 ---
 
-## Design Decisions
+## 📜 License
 
-1. **Text command interface**: Agent sends simple text strings — more natural for LLMs than structured JSON actions
-2. **Seeded generation**: `random.Random(seed)` ensures identical datasets across runs
-3. **Progressive difficulty**: Easy→Medium→Hard introduces qualitatively different error types, not just more rows
-4. **Anti-exploit**: Dropping all rows removes duplicates but destroys data → penalized
-5. **Multi-dimensional grading**: 5 orthogonal quality dimensions prevent gaming any single metric
-
----
-
-## License
-
-BSD-3-Clause — see [LICENSE](LICENSE)
+BSD-style license. See [LICENSE](LICENSE) for details.

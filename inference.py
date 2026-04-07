@@ -4,6 +4,11 @@ DataWranglerEnv — Baseline Inference Script
 Runs an LLM agent against the DataWrangler environment across all 3 tasks.
 Uses the OpenAI API client. Emits structured [START]/[STEP]/[END] logs.
 
+Agent Strategy (3-Phase):
+    Phase 1 (DIAGNOSE): profile, find_missing, find_duplicates, check_rules
+    Phase 2 (CLEAN):    Systematic cleaning - types → missing → duplicates → values
+    Phase 3 (VERIFY):   validate, review, submit
+
 Environment variables:
     API_BASE_URL  - The API endpoint for the LLM
     MODEL_NAME    - The model identifier to use
@@ -49,41 +54,62 @@ TASKS = [
 ]
 
 
-SYSTEM_PROMPT = """You are an expert data analyst tasked with cleaning a messy dataset.
+# ── 3-Phase System Prompt ────────────────────────────────────────────────────
 
-You interact with the dataset by sending short text commands. Available commands:
-  help                          - Show all commands
-  view [N]                      - Show first N rows
-  profile                       - Dataset summary (shape, dtypes, missing %, duplicates)
-  profile_column COL            - Detailed stats for one column
-  find_missing                  - Missing value counts per column
-  find_duplicates [COL1,COL2]   - Find duplicate rows
-  find_outliers COL             - Outlier detection for numeric column
-  fill_missing COL STRATEGY     - Fill nulls (mean/median/mode/constant VALUE)
-  remove_duplicates [COL1,COL2] - Drop duplicates
-  fix_dtype COL TYPE            - Cast column type (int/float/str/datetime)
-  replace COL OLD NEW           - Replace specific values
-  standardize COL METHOD        - Normalize formatting (lowercase/uppercase/titlecase/strip)
-  remove_rows COL CONDITION VAL - Remove rows (equals/less_than/greater_than/contains)
-  clip COL LOWER UPPER          - Clip numeric values
-  validate                      - Check current quality score
-  submit                        - Finalize and get final score
+SYSTEM_PROMPT = """You are an expert data scientist specializing in data cleaning and quality assurance.
+You interact with a messy dataset through text commands to diagnose and fix data quality issues.
 
-Strategy:
-1. Start with 'profile' to understand the dataset
-2. Use 'find_missing', 'find_duplicates', 'find_outliers' to diagnose issues
-3. Fix issues systematically — missing values first, then duplicates, then types, then values
-4. Use 'validate' to check progress periodically
-5. When satisfied, use 'submit' to finalize
+Available commands:
+  DIAGNOSTIC (read-only):
+    profile                       - Dataset overview (shape, types, missing %, duplicates)
+    profile_column COL            - Detailed stats for one column
+    find_missing                  - Missing value counts per column
+    find_duplicates [COL1,COL2]   - Find duplicate rows
+    find_outliers COL             - Outlier detection (IQR method)
+    check_rules                   - Check business rule violations
+    history                       - Show operation history / data lineage
+    view [N]                      - Show first N rows
 
-IMPORTANT: Respond with ONLY the command to execute. No explanations, no markdown, just the command.
-For example: fill_missing age mean
+  CLEANING (modifies data):
+    fill_missing COL STRATEGY     - Fill nulls (mean/median/mode/constant VALUE/forward_fill)
+    remove_duplicates [COL1,COL2] - Drop duplicate rows
+    fix_dtype COL TYPE            - Cast column type (int/float/str/datetime)
+    replace COL OLD NEW           - Replace exact values
+    regex_replace COL PATTERN NEW - Regex-based replacement
+    standardize COL METHOD        - Normalize formatting (lowercase/uppercase/titlecase/strip)
+    remove_rows COL COND VAL      - Remove rows (equals/less_than/greater_than/contains)
+    clip COL LOWER UPPER          - Clip numeric values to range
+    rename_column OLD NEW         - Rename a column
+    drop_column COL               - Remove a column
+    sort COL [asc|desc]           - Sort data
+    undo                          - Undo last modification
+
+  EVALUATION:
+    validate                      - Check current quality score (8 dimensions)
+    submit                        - Finalize and get final score (ends episode)
+
+CLEANING WORKFLOW (follow this order):
+  Phase 1 — DIAGNOSE: Run profile, find_missing, find_duplicates, check_rules, find_outliers
+  Phase 2 — CLEAN (in this order):
+    a. Fix data types first (fix_dtype, regex_replace to strip $ or special chars)
+    b. Fill missing values (fill_missing with appropriate strategy per column)
+    c. Remove duplicate rows (remove_duplicates)
+    d. Fix outliers/impossible values (clip, remove_rows for negative where shouldn't be)
+    e. Standardize categorical values (standardize, replace for inconsistent labels)
+    f. Fix business rule violations (check_rules, then fix each violation)
+  Phase 3 — VERIFY: validate to check score, fix remaining issues, then submit
+
+CRITICAL RULES:
+- Respond with ONLY the command. No explanations, no markdown, no commentary.
+- Do NOT remove legitimate data — some rows that look odd are intentional red herrings.
+- A person named "Null" is a real person, not missing data.
+- A price of $0.00 may be a legitimate free promotional item.
+- Use 'undo' if a command makes the score worse.
+- Always validate before submitting.
 """
 
 
 # ── Lightweight HTTP-based Environment Client ────────────────────────────────
-# Uses raw requests to communicate with the OpenEnv HTTP server, avoiding
-# any dependency on the openenv client library.
 
 class DataWranglerHTTPClient:
     """Simple HTTP client for the DataWrangler environment."""
@@ -156,30 +182,49 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]):
 
 # ── Agent Logic ──────────────────────────────────────────────────────────────
 
-def build_user_prompt(step: int, last_response: str, last_reward: float, history: List[str]) -> str:
-    """Build the user prompt for the LLM."""
-    truncated = last_response[:1500] if len(last_response) > 1500 else last_response
-    recent = history[-5:] if len(history) > 5 else history
+def build_user_prompt(
+    step: int,
+    phase: str,
+    last_response: str,
+    last_reward: float,
+    history: List[str],
+    task_name: str,
+    diagnosis_summary: str,
+) -> str:
+    """Build a context-rich prompt for the LLM."""
+    truncated = last_response[:2000] if len(last_response) > 2000 else last_response
+    recent = history[-8:] if len(history) > 8 else history
     history_str = "\n".join(recent) if recent else "No actions taken yet."
 
-    return (
-        f"Step {step}.\n\n"
+    prompt = f"Step {step} | Phase: {phase} | Task: {task_name}\n\n"
+
+    if diagnosis_summary:
+        prompt += f"Dataset Diagnosis Summary:\n{diagnosis_summary}\n\n"
+
+    prompt += (
         f"Last command result:\n{truncated}\n\n"
         f"Last reward: {last_reward:+.3f}\n\n"
-        f"Recent history:\n{history_str}\n\n"
+        f"Action history:\n{history_str}\n\n"
         f"What command should I execute next? Reply with ONLY the command."
     )
+
+    return prompt
 
 
 def get_model_message(
     client: OpenAI,
     step: int,
+    phase: str,
     last_response: str,
     last_reward: float,
     history: List[str],
+    task_name: str,
+    diagnosis_summary: str,
 ) -> str:
     """Get the next command from the LLM."""
-    user_prompt = build_user_prompt(step, last_response, last_reward, history)
+    user_prompt = build_user_prompt(
+        step, phase, last_response, last_reward, history, task_name, diagnosis_summary
+    )
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
@@ -195,10 +240,27 @@ def get_model_message(
         # Clean up — remove markdown code blocks if present
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        # Remove any leading/trailing quotes
+        text = text.strip("'\"")
         return text if text else "profile"
     except Exception as exc:
         print(f"[DEBUG] Model request failed: {exc}", flush=True)
         return "profile"
+
+
+def determine_phase(step: int, max_steps: int, history: List[str]) -> str:
+    """Determine the current phase based on step number and history."""
+    # Phase 1: DIAGNOSE (first ~15% of steps)
+    diagnose_budget = max(3, int(max_steps * 0.15))
+    # Phase 3: VERIFY (last ~10% of steps)
+    verify_start = int(max_steps * 0.85)
+
+    if step <= diagnose_budget:
+        return "DIAGNOSE"
+    elif step >= verify_start:
+        return "VERIFY"
+    else:
+        return "CLEAN"
 
 
 # ── Main Loop ────────────────────────────────────────────────────────────────
@@ -215,6 +277,7 @@ async def run_task(llm_client: OpenAI, env: DataWranglerHTTPClient, task_config:
     steps_taken = 0
     score = 0.001
     success = False
+    diagnosis_summary = ""
 
     log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 
@@ -224,13 +287,21 @@ async def run_task(llm_client: OpenAI, env: DataWranglerHTTPClient, task_config:
         obs = result.get("observation", {})
         last_response = obs.get("response", "")
         last_reward = 0.0
+        last_score = 0.0
 
         for step in range(1, max_steps + 1):
             if result.get("done", False):
                 break
 
-            message = get_model_message(llm_client, step, last_response, last_reward, history)
+            phase = determine_phase(step, max_steps, history)
 
+            # Get LLM's decision
+            message = get_model_message(
+                llm_client, step, phase, last_response, last_reward,
+                history, task_name, diagnosis_summary
+            )
+
+            # Execute
             result = env.step(message)
             obs = result.get("observation", {})
 
@@ -242,16 +313,25 @@ async def run_task(llm_client: OpenAI, env: DataWranglerHTTPClient, task_config:
             steps_taken = step
             last_response = obs.get("response", "")
             last_reward = reward
+            current_score = obs.get("current_score", 0.0)
+
+            # Update diagnosis summary from profile/find_ commands
+            cmd_lower = message.strip().lower()
+            if cmd_lower in ("profile", "find_missing", "find_duplicates", "check_rules"):
+                diagnosis_summary += f"\n--- {message} ---\n{last_response[:500]}\n"
+
+            # Track score improvement
+            if "validate" in cmd_lower or "submit" in cmd_lower:
+                last_score = current_score
 
             log_step(step=step, action=message, reward=reward, done=done, error=error)
-
-            history.append(f"Step {step}: '{message}' -> reward {reward:+.3f}")
+            history.append(f"Step {step}: '{message}' → reward {reward:+.3f}")
 
             if done:
                 break
 
         score = sum(rewards) / max_total_reward if max_total_reward > 0 else 0.001
-        # Clamp to open interval (0, 1) — validator rejects 0.0 and 1.0
+        # Clamp to open interval (0, 1)
         score = max(0.001, min(0.999, score))
         success = score >= success_threshold
 

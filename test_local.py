@@ -21,7 +21,7 @@ obs = env.reset(task="task_1_easy", seed=42)
 check("Reset returns observation", obs is not None)
 check("step_number=0", obs.step_number == 0, f"got {obs.step_number}")
 check("done=False", obs.done == False)
-check("Shape has 55", "55" in obs.dataset_shape, f"got {obs.dataset_shape}")
+check("Shape has 58", "58" in obs.dataset_shape, f"got {obs.dataset_shape}")
 
 # Test 2: Step increments
 results.append("\n[2] Step increments")

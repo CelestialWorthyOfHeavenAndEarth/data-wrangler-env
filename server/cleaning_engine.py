@@ -3,8 +3,17 @@ Cleaning Engine for DataWranglerEnv.
 
 Parses text commands from the agent and executes data cleaning operations
 on the working DataFrame. Returns text results for the observation.
+
+Commands:
+    Diagnostic: help, view, profile, profile_column, find_missing,
+                find_duplicates, find_outliers
+    Cleaning:   fill_missing, remove_duplicates, fix_dtype, replace,
+                regex_replace, standardize, remove_rows, clip,
+                rename_column, drop_column, sort
+    Special:    validate, submit
 """
 
+import re
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -48,9 +57,13 @@ class CleaningEngine:
             "remove_duplicates": self._cmd_remove_duplicates,
             "fix_dtype": self._cmd_fix_dtype,
             "replace": self._cmd_replace,
+            "regex_replace": self._cmd_regex_replace,
             "standardize": self._cmd_standardize,
             "remove_rows": self._cmd_remove_rows,
             "clip": self._cmd_clip,
+            "rename_column": self._cmd_rename_column,
+            "drop_column": self._cmd_drop_column,
+            "sort": self._cmd_sort,
             "validate": self._cmd_validate,
             "submit": self._cmd_submit,
         }
@@ -106,7 +119,7 @@ class CleaningEngine:
                 n = int(args[0])
             except ValueError:
                 return "Error: 'view' expects an integer argument. Usage: view [N]", False
-        n = min(n, 50)  # cap to prevent huge output
+        n = min(n, 50)
         result = self.df.head(n).to_string(max_colwidth=30)
         return f"Showing first {n} rows ({len(self.df)} total):\n\n{result}", False
 
@@ -124,10 +137,8 @@ class CleaningEngine:
             unique = self.df[col].nunique()
             lines.append(f"{col:<20} {dtype:<12} {non_null:<10} {missing:<10} {missing_pct:<10} {unique:<8}")
 
-        # Duplicate check
         n_dupes = self.df.duplicated().sum()
         lines.append(f"\nDuplicate rows: {n_dupes} ({n_dupes / len(self.df) * 100:.1f}%)")
-
         return "\n".join(lines), False
 
     def _cmd_profile_column(self, args: list) -> Tuple[str, bool]:
@@ -310,7 +321,6 @@ class CleaningEngine:
         before_type = str(self.df[col].dtype)
         errors = 0
         if target in ("int", "int64"):
-            # First try to clean string values (remove $, commas etc.)
             self.df[col] = self.df[col].astype(str).str.replace(r'[^\d.\-]', '', regex=True)
             numeric = pd.to_numeric(self.df[col], errors="coerce")
             errors = numeric.isna().sum() - self.df[col].isna().sum()
@@ -338,7 +348,6 @@ class CleaningEngine:
         if col not in self.df.columns:
             return f"Error: Column '{col}' not found.", False
 
-        # Count matches before replacement
         mask = self.df[col].astype(str) == old_val
         n_matches = mask.sum()
 
@@ -347,6 +356,27 @@ class CleaningEngine:
 
         self.df.loc[mask, col] = new_val
         return f"Replaced {n_matches} occurrences of '{old_val}' with '{new_val}' in '{col}'.", True
+
+    def _cmd_regex_replace(self, args: list) -> Tuple[str, bool]:
+        """Regex-based replacement within a column."""
+        if len(args) < 3:
+            return "Error: Usage: regex_replace COLUMN PATTERN REPLACEMENT", False
+        col = args[0]
+        pattern = args[1]
+        replacement = args[2]
+        if col not in self.df.columns:
+            return f"Error: Column '{col}' not found.", False
+
+        try:
+            before_vals = self.df[col].astype(str).copy()
+            self.df[col] = self.df[col].astype(str).str.replace(pattern, replacement, regex=True)
+            n_changed = (before_vals != self.df[col].astype(str)).sum()
+        except re.error as e:
+            return f"Error: Invalid regex pattern '{pattern}': {e}", False
+
+        if n_changed == 0:
+            return f"No matches for pattern '{pattern}' in column '{col}'.", False
+        return f"Regex replaced {n_changed} values in '{col}' (pattern: '{pattern}' → '{replacement}').", True
 
     def _cmd_standardize(self, args: list) -> Tuple[str, bool]:
         if len(args) < 2:
@@ -371,7 +401,6 @@ class CleaningEngine:
 
         after_uniq = self.df[col].nunique()
         consolidated = before_uniq - after_uniq
-
         return f"Standardized '{col}' using {method}. Unique values: {before_uniq} → {after_uniq} (consolidated {consolidated}).", True
 
     def _cmd_remove_rows(self, args: list) -> Tuple[str, bool]:
@@ -427,17 +456,50 @@ class CleaningEngine:
 
         numeric_col = pd.to_numeric(self.df[col], errors="coerce")
         n_clipped = ((numeric_col < lower) | (numeric_col > upper)).sum()
-
         self.df[col] = numeric_col.clip(lower=lower, upper=upper)
-
         return f"Clipped {n_clipped} values in '{col}' to [{lower}, {upper}].", True
+
+    def _cmd_rename_column(self, args: list) -> Tuple[str, bool]:
+        """Rename a column."""
+        if len(args) < 2:
+            return "Error: Usage: rename_column OLD_NAME NEW_NAME", False
+        old_name = args[0]
+        new_name = args[1]
+        if old_name not in self.df.columns:
+            return f"Error: Column '{old_name}' not found.", False
+        if new_name in self.df.columns:
+            return f"Error: Column '{new_name}' already exists.", False
+        self.df = self.df.rename(columns={old_name: new_name})
+        return f"Renamed column '{old_name}' → '{new_name}'.", True
+
+    def _cmd_drop_column(self, args: list) -> Tuple[str, bool]:
+        """Drop a column from the dataset."""
+        if not args:
+            return "Error: Usage: drop_column COLUMN_NAME", False
+        col = args[0]
+        if col not in self.df.columns:
+            return f"Error: Column '{col}' not found.", False
+        self.df = self.df.drop(columns=[col])
+        return f"Dropped column '{col}'. Remaining columns: {len(self.df.columns)}", True
+
+    def _cmd_sort(self, args: list) -> Tuple[str, bool]:
+        """Sort dataset by a column."""
+        if not args:
+            return "Error: Usage: sort COLUMN [asc|desc]", False
+        col = args[0]
+        if col not in self.df.columns:
+            return f"Error: Column '{col}' not found.", False
+        ascending = True
+        if len(args) > 1 and args[1].lower() == "desc":
+            ascending = False
+        self.df = self.df.sort_values(by=col, ascending=ascending, na_position="last").reset_index(drop=True)
+        direction = "ascending" if ascending else "descending"
+        return f"Sorted dataset by '{col}' ({direction}).", True
 
     # ── Special commands ─────────────────────────────────────────────────
 
     def _cmd_validate(self, args: list) -> Tuple[str, bool]:
-        # Placeholder — actual scoring done by the environment
         return "__VALIDATE__", False
 
     def _cmd_submit(self, args: list) -> Tuple[str, bool]:
-        # Placeholder — actual submission done by the environment
         return "__SUBMIT__", False
