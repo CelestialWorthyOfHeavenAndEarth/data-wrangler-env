@@ -1,4 +1,0 @@
-RESET: step=N/A, shape=N/A
-STEP1: step=N/A, reward=N/A
-STEP2: step=N/A
-SUBMIT: done=None, score=N/A

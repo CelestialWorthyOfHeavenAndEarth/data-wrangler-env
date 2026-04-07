@@ -1,8 +1,0 @@
-ENV_BASE_URL: https://aswini-kumar-data-wrangler-env.hf.space
-Health: True
-Reset done: False
-Step reward: 0.02
-Submit done: True reward: 0.5309999999999999
-Task2 done: False
-Task3 done: False
-ALL OK
