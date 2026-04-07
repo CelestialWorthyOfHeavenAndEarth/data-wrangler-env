@@ -208,6 +208,9 @@ def generate_task_2_medium(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFra
     dirty_df = pd.concat([dirty_df, dupe_rows], ignore_index=True)
     issues["duplicates"] = [{"source_row": idx} for idx in dupe_indices]
 
+    # Convert price to object dtype BEFORE inserting string values (pandas 3.x compat)
+    dirty_df["price"] = dirty_df["price"].astype(object)
+
     # Type errors: prices as strings with "$" prefix (~10 rows)
     type_error_indices = rng.sample(range(n_rows), 10)
     for idx in type_error_indices:
@@ -229,6 +232,7 @@ def generate_task_2_medium(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFra
                 pass
 
     # Negative quantities (~5 rows)
+    dirty_df["quantity"] = dirty_df["quantity"].astype(object)
     neg_indices = rng.sample(range(n_rows), 5)
     for idx in neg_indices:
         dirty_df.at[idx, "quantity"] = -abs(int(dirty_df.at[idx, "quantity"]))
@@ -240,9 +244,6 @@ def generate_task_2_medium(rng: random.Random) -> Tuple[pd.DataFrame, pd.DataFra
         if pd.notna(dirty_df.at[idx, "price"]) and not isinstance(dirty_df.at[idx, "price"], str):
             dirty_df.at[idx, "price"] = round(rng.uniform(50000, 99999), 2)
             issues["outliers"].append({"row": idx, "column": "price"})
-
-    # Force price column to object dtype (mixed str/float)
-    dirty_df["price"] = dirty_df["price"].astype(object)
 
     return dirty_df, clean_df, issues
 

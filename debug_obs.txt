@@ -1,0 +1,14 @@
+available_commands: str = 'Available commands:\n  help                          - Show this help message\n  view [N]          ...
+current_score: float = 0.0
+dataset_shape: str = '55 rows × 5 columns'
+max_steps: int = 30
+response: str = 'Dataset Shape: 55 rows × 5 columns\n\nColumns:\nColumn               Type         Non-Null   Missin...
+step_number: int = 0
+task_name: str = 'task_1_easy'
+
+Top-level done: False
+Top-level reward: 0.02
+
+--- Task 2 test ---
+Task 2 status: 500
+Task 2 text (first 200): Internal Server Error

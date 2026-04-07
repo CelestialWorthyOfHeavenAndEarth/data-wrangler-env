@@ -1,0 +1,66 @@
+============================================================
+DataWranglerEnv Comprehensive Audit
+============================================================
+
+[1] Health Check
+  PASS: Health status 200
+  PASS: Health body
+
+[2] Schema Endpoint
+  PASS: Schema status 200
+  PASS: Schema has action
+  PASS: Schema has observation
+
+[3] Reset - task_1_easy
+  PASS: Reset status 200
+  PASS: Has observation
+  PASS: Has done
+  PASS: Has reward
+  PASS: done=False
+  PASS: Obs has response
+  PASS: Obs has step_number
+  PASS: Obs has dataset_shape
+  PASS: Obs has current_score
+  PASS: Obs step=0
+  PASS: Shape has 55
+
+[4] Step - profile
+  PASS: Step status 200
+  PASS: Has observation
+  FAIL: step_number=1 -> got 0
+  PASS: reward>0
+  PASS: done=False
+
+[5] Step - fill_missing age mean
+  FAIL: step_number=2 -> got 0
+  PASS: Filled in response
+
+[6] Step - validate
+  FAIL: step_number=3 -> got 0
+  PASS: score>0
+
+[7] Step - submit
+  PASS: done=True
+  PASS: reward>0
+  PASS: final score>0
+
+[8] State Endpoint
+  PASS: State 200
+  PASS: Has episode_id
+
+[9] Reset - task_2_medium
+  FAIL: Task 2 -> Expecting value: line 1 column 1 (char 0)
+
+[10] Reset - task_3_hard
+  PASS: Task 3 done=False
+  PASS: Task 3 has rows
+
+============================================================
+RESULTS: 29 passed, 4 failed
+
+FAILURES:
+  FAIL: step_number=1 -> got 0
+  FAIL: step_number=2 -> got 0
+  FAIL: step_number=3 -> got 0
+  FAIL: Task 2 -> Expecting value: line 1 column 1 (char 0)
+============================================================

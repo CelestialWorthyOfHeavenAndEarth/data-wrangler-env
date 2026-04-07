@@ -1,0 +1,22 @@
+.gitattributes
+.gitignore
+Dockerfile
+README.md
+__init__.py
+client.py
+inference.py
+models.py
+openenv.yaml
+pyproject.toml
+requirements.txt
+server/Dockerfile
+server/__init__.py
+server/app.py
+server/cleaning_engine.py
+server/data_wrangler_env_environment.py
+server/dataset_generator.py
+server/grader.py
+server/requirements.txt
+uv.lock
+
+Total: 20 files

@@ -1,0 +1,42 @@
+=== LOCAL ENVIRONMENT UNIT TEST ===
+
+[1] Reset task_1_easy
+  PASS: Reset returns observation
+  PASS: step_number=0
+  PASS: done=False
+  PASS: Shape has 55
+
+[2] Step increments
+  PASS: step_number=1
+  PASS: reward>0
+  PASS: done=False
+  PASS: step_number=2
+  PASS: step_number=3
+  PASS: Filled in response
+
+[3] Validate
+  PASS: step_number=4
+  PASS: score>0
+
+[4] Submit
+  PASS: done=True
+  PASS: reward>0
+  PASS: score>0
+
+[5] Reset task_2_medium
+  PASS: Task 2 resets
+  PASS: Task 2 shape
+  PASS: Task 2 step=0
+
+[6] Reset task_3_hard
+  PASS: Task 3 resets
+  PASS: Task 3 shape
+
+[7] Task 2 full lifecycle
+  PASS: Task 2 profile step=1
+  PASS: Task 2 submit done
+  PASS: Task 2 submit score>0
+
+==================================================
+RESULTS: 23 passed, 0 failed
+ALL TESTS PASSED!
