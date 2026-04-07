@@ -1,0 +1,3 @@
+task_1_easy: score=0.5309999999999999 reward=0.5309999999999999 0<score<1=True 0<reward<1=True
+task_2_medium: score=0.5309999999999999 reward=0.5309999999999999 0<score<1=True 0<reward<1=True
+task_3_hard: score=0.5309999999999999 reward=0.5309999999999999 0<score<1=True 0<reward<1=True

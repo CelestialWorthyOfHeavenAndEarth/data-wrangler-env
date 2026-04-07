@@ -136,13 +136,13 @@ class DataWranglerEnvironment(Environment):
         return DataWranglerObservation(
             response=initial_msg,
             dataset_shape=shape,
-            current_score=0.0,
+            current_score=0.001,
             step_number=0,
             max_steps=self._max_steps,
             task_name=self._task_name,
             available_commands=COMMANDS_HELP,
             done=False,
-            reward=0.0,
+            reward=0.001,
         )
 
     def step(self, action: DataWranglerAction) -> DataWranglerObservation:  # type: ignore[override]
@@ -161,7 +161,7 @@ class DataWranglerEnvironment(Environment):
         if self._done:
             return self._make_observation(
                 response="Episode already finished. Call reset() to start a new one.",
-                reward=0.0,
+                reward=0.001,
                 done=True,
             )
 
@@ -200,7 +200,7 @@ class DataWranglerEnvironment(Environment):
             self._last_score = current_score
 
             response = self._format_validation_report(current_score, dim_scores)
-            reward = 0.01 if self._validate_count <= 5 else 0.0  # Diminishing reward
+            reward = 0.01 if self._validate_count <= 5 else 0.001  # Diminishing reward
             self._cumulative_reward += reward
 
             return self._make_observation(response=response, reward=reward, done=False)
@@ -258,7 +258,7 @@ class DataWranglerEnvironment(Environment):
             task_name=self._task_name,
             available_commands=COMMANDS_HELP,
             done=done,
-            reward=self._clamp_score(reward) if done else reward,
+            reward=self._clamp_score(reward) if done else max(0.001, reward) if reward >= 0 else reward,
             metadata={
                 "cumulative_reward": round(self._cumulative_reward, 4),
                 "task": self._task_name,

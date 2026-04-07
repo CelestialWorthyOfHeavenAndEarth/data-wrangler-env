@@ -213,7 +213,7 @@ async def run_task(llm_client: OpenAI, env: DataWranglerHTTPClient, task_config:
     history: List[str] = []
     rewards: List[float] = []
     steps_taken = 0
-    score = 0.0
+    score = 0.001
     success = False
 
     log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
@@ -250,8 +250,9 @@ async def run_task(llm_client: OpenAI, env: DataWranglerHTTPClient, task_config:
             if done:
                 break
 
-        score = sum(rewards) / max_total_reward if max_total_reward > 0 else 0.0
-        score = min(max(score, 0.0), 1.0)
+        score = sum(rewards) / max_total_reward if max_total_reward > 0 else 0.001
+        # Clamp to open interval (0, 1) — validator rejects 0.0 and 1.0
+        score = max(0.001, min(0.999, score))
         success = score >= success_threshold
 
     except Exception as e:

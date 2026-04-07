@@ -201,7 +201,7 @@ def compute_step_reward(
 
     # Submit doesn't give step reward (final score is computed separately)
     if cmd == "submit":
-        return 0.0
+        return 0.001
 
     if not data_modified:
         # Command tried to modify but failed (or no change)
@@ -225,4 +225,4 @@ def compute_step_reward(
         return max(-0.20, improvement * 2.0)
     else:
         # Negligible change
-        return 0.0
+        return 0.001
