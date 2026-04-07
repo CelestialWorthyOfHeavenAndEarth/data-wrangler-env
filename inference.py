@@ -8,6 +8,7 @@ Environment variables:
     API_BASE_URL  - The API endpoint for the LLM
     MODEL_NAME    - The model identifier to use
     HF_TOKEN      - API key for authentication
+    ENV_BASE_URL  - (optional) Override the environment server URL
 
 Usage:
     export API_BASE_URL="https://api.openai.com/v1"
@@ -20,15 +21,10 @@ import asyncio
 import os
 import sys
 import traceback
-from typing import List
+from typing import Any, Dict, List, Optional
 
+import requests
 from openai import OpenAI
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from models import DataWranglerAction
-from client import DataWranglerEnv
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -36,9 +32,11 @@ API_BASE_URL = os.environ.get("API_BASE_URL") or "https://router.huggingface.co/
 MODEL_NAME = os.environ.get("MODEL_NAME") or "meta-llama/Llama-3.1-8B-Instruct"
 API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY") or ""
 
-# ENV_BASE_URL: connect directly to this server instead of launching Docker locally.
-# Set to your HF Space URL for testing: https://aswini-kumar-data-wrangler-env.hf.space
-ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "")
+# Default to our deployed HF Space if ENV_BASE_URL not set
+ENV_BASE_URL = (
+    os.environ.get("ENV_BASE_URL")
+    or "https://aswini-kumar-data-wrangler-env.hf.space"
+)
 IMAGE_NAME = os.environ.get("IMAGE_NAME", "data-wrangler-env:latest")
 BENCHMARK = "DataWranglerEnv"
 TEMPERATURE = 0.3
@@ -83,6 +81,50 @@ For example: fill_missing age mean
 """
 
 
+# ── Lightweight HTTP-based Environment Client ────────────────────────────────
+# Uses raw requests to communicate with the OpenEnv HTTP server, avoiding
+# any dependency on the openenv client library.
+
+class DataWranglerHTTPClient:
+    """Simple HTTP client for the DataWrangler environment."""
+
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
+
+    def reset(self, task: str = "task_1_easy", seed: int = 42) -> Dict[str, Any]:
+        """Reset the environment. Returns {observation, reward, done}."""
+        r = self.session.post(
+            f"{self.base_url}/reset",
+            json={"task": task, "seed": seed},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def step(self, message: str) -> Dict[str, Any]:
+        """Execute an action. Returns {observation, reward, done}."""
+        r = self.session.post(
+            f"{self.base_url}/step",
+            json={"action": {"message": message}},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def health(self) -> bool:
+        """Check if the server is up."""
+        try:
+            r = self.session.get(f"{self.base_url}/health", timeout=10)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def close(self):
+        """Close the HTTP session."""
+        self.session.close()
+
+
 # ── Logging — MANDATORY PLAIN-TEXT FORMAT ────────────────────────────────────
 # Spec: https://openenv.meta.com (sample inference script)
 #   [START] task=<task> env=<env> model=<model>
@@ -116,10 +158,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]):
 
 def build_user_prompt(step: int, last_response: str, last_reward: float, history: List[str]) -> str:
     """Build the user prompt for the LLM."""
-    # Truncate response to prevent token overflow
     truncated = last_response[:1500] if len(last_response) > 1500 else last_response
-
-    # Show recent history (last 5 actions)
     recent = history[-5:] if len(history) > 5 else history
     history_str = "\n".join(recent) if recent else "No actions taken yet."
 
@@ -164,7 +203,7 @@ def get_model_message(
 
 # ── Main Loop ────────────────────────────────────────────────────────────────
 
-async def run_task(client: OpenAI, task_config: dict) -> float:
+async def run_task(llm_client: OpenAI, env: DataWranglerHTTPClient, task_config: dict) -> float:
     """Run a single task and return the score."""
     task_name = task_config["name"]
     max_steps = task_config["max_steps"]
@@ -179,33 +218,29 @@ async def run_task(client: OpenAI, task_config: dict) -> float:
 
     log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 
-    # Connect to env: use ENV_BASE_URL if set (e.g. HF Space), else launch Docker
-    if ENV_BASE_URL:
-        env = DataWranglerEnv(base_url=ENV_BASE_URL)
-    else:
-        env = await DataWranglerEnv.from_docker_image(IMAGE_NAME)
-
     try:
-        result = await env.reset(task=task_name, seed=42)
-        last_response = result.observation.response
+        # Reset environment
+        result = env.reset(task=task_name, seed=42)
+        obs = result.get("observation", {})
+        last_response = obs.get("response", "")
         last_reward = 0.0
 
         for step in range(1, max_steps + 1):
-            if result.done:
+            if result.get("done", False):
                 break
 
-            message = get_model_message(client, step, last_response, last_reward, history)
+            message = get_model_message(llm_client, step, last_response, last_reward, history)
 
-            result = await env.step(DataWranglerAction(message=message))
-            obs = result.observation
+            result = env.step(message)
+            obs = result.get("observation", {})
 
-            reward = result.reward or 0.0
-            done = result.done
+            reward = result.get("reward", 0.0) or 0.0
+            done = result.get("done", False)
             error = None
 
             rewards.append(reward)
             steps_taken = step
-            last_response = obs.response
+            last_response = obs.get("response", "")
             last_reward = reward
 
             log_step(step=step, action=message, reward=reward, done=done, error=error)
@@ -223,10 +258,6 @@ async def run_task(client: OpenAI, task_config: dict) -> float:
         print(f"[DEBUG] Task {task_name} error: {e}", flush=True)
         traceback.print_exc()
     finally:
-        try:
-            await env.close()
-        except Exception as e:
-            print(f"[DEBUG] env.close() error: {e}", flush=True)
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
     return score
@@ -234,19 +265,27 @@ async def run_task(client: OpenAI, task_config: dict) -> float:
 
 async def main() -> None:
     """Run all tasks sequentially."""
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    llm_client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    env = DataWranglerHTTPClient(base_url=ENV_BASE_URL)
 
-    scores = {}
-    for task_config in TASKS:
-        score = await run_task(client, task_config)
-        scores[task_config["name"]] = score
+    # Verify environment is reachable
+    if not env.health():
+        print(f"[DEBUG] Warning: Environment at {ENV_BASE_URL} is not reachable", flush=True)
 
-    print("\n" + "=" * 50, flush=True)
-    print("FINAL SCORES:", flush=True)
-    for task_name, score in scores.items():
-        print(f"  {task_name}: {score:.4f}", flush=True)
-    print(f"  Average: {sum(scores.values()) / len(scores):.4f}", flush=True)
-    print("=" * 50, flush=True)
+    try:
+        scores = {}
+        for task_config in TASKS:
+            score = await run_task(llm_client, env, task_config)
+            scores[task_config["name"]] = score
+
+        print("\n" + "=" * 50, flush=True)
+        print("FINAL SCORES:", flush=True)
+        for task_name, score in scores.items():
+            print(f"  {task_name}: {score:.4f}", flush=True)
+        print(f"  Average: {sum(scores.values()) / len(scores):.4f}", flush=True)
+        print("=" * 50, flush=True)
+    finally:
+        env.close()
 
 
 if __name__ == "__main__":
